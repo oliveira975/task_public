@@ -257,7 +257,7 @@ with st.expander("📋 Colar tabela (com cabeçalho, separada por tab)", expande
 
 # --- Menu lateral: navegar entre Andares (tela principal) e Histórico ---
 st.sidebar.divider()
-pagina = st.sidebar.radio("📌 Navegação", ["📦 Andares", "🗂️ Histórico"])
+pagina = st.sidebar.radio("📌 Navegação", ["📦 Andares", "🗂️ Histórico", "💬 Chat"])
 
 if pagina == "📦 Andares":
     # --- Carregar dados do turno atual ---
@@ -375,7 +375,7 @@ if pagina == "📦 Andares":
 
                 st.divider()
 
-else:
+elif pagina == "🗂️ Histórico":
     # --- Página Histórico: tasks concluídas individualmente + snapshots de
     #     fechamento de turno, agrupadas por dia (dd/mm/aaaa) ---
     st.title("🗂️ Histórico")
@@ -436,6 +436,92 @@ else:
             supabase.table("historico_tasks").delete().neq("id", 0).execute()
             st.success("Histórico limpo com sucesso!")
             st.rerun()
+
+else:
+    # --- Página Chat: mensagens gerais do time, visíveis para todos os
+    #     usuários logados. O bloco roda dentro de um st.fragment com
+    #     run_every="3s": só ESSE pedaço da tela é recarregado a cada 3
+    #     segundos (não o app inteiro), então mensagens de outras pessoas
+    #     aparecem sozinhas sem atrapalhar o que você estiver fazendo em
+    #     outras abas/telas.
+    st.title("💬 Chat do Time")
+
+    @st.fragment(run_every="3s")
+    def chat_fragment():
+        mensagens = (
+            supabase.table("mensagens_chat")
+            .select("*")
+            .order("criado_em", desc=False)
+            .limit(200)
+            .execute()
+            .data
+        )
+
+        email_atual = st.session_state["user"].email
+
+        area_chat = st.container(height=450)
+        with area_chat:
+            if not mensagens:
+                st.caption("Nenhuma mensagem ainda. Seja o primeiro a escrever!")
+            for msg in mensagens:
+                autor = msg["usuario_email"]
+                hora = pd.to_datetime(msg["criado_em"]).strftime("%d/%m %H:%M")
+                papel = "user" if autor == email_atual else "assistant"
+                msg_id = msg["id"]
+                editando_key = f"editando_msg_{msg_id}"
+
+                with st.chat_message(papel):
+                    if st.session_state.get(editando_key):
+                        # --- Modo edição: campo de texto + salvar/cancelar ---
+                        texto_editado = st.text_input(
+                            "Editar mensagem",
+                            value=msg["mensagem"],
+                            key=f"input_edicao_{msg_id}",
+                            label_visibility="collapsed",
+                        )
+                        col_salvar, col_cancelar = st.columns([1, 1])
+                        with col_salvar:
+                            if st.button("💾 Salvar", key=f"salvar_{msg_id}"):
+                                supabase.table("mensagens_chat").update(
+                                    {"mensagem": texto_editado, "editado": True}
+                                ).eq("id", msg_id).execute()
+                                st.session_state[editando_key] = False
+                                st.rerun(scope="fragment")
+                        with col_cancelar:
+                            if st.button("✖️ Cancelar", key=f"cancelar_{msg_id}"):
+                                st.session_state[editando_key] = False
+                                st.rerun(scope="fragment")
+                    else:
+                        # --- Modo normal: texto + botões editar/apagar (só do autor) ---
+                        sufixo_editado = " _(editado)_" if msg.get("editado") else ""
+                        st.markdown(f"**{autor}** · {hora}{sufixo_editado}")
+                        st.write(msg["mensagem"])
+
+                        if autor == email_atual:
+                            col_editar, col_apagar, _col_resto = st.columns([1, 1, 8])
+                            with col_editar:
+                                if st.button(
+                                    "✏️", key=f"editar_{msg_id}", help="Editar mensagem"
+                                ):
+                                    st.session_state[editando_key] = True
+                                    st.rerun(scope="fragment")
+                            with col_apagar:
+                                if st.button(
+                                    "🗑️", key=f"apagar_{msg_id}", help="Apagar mensagem"
+                                ):
+                                    supabase.table("mensagens_chat").delete().eq(
+                                        "id", msg_id
+                                    ).execute()
+                                    st.rerun(scope="fragment")
+
+        nova_mensagem = st.chat_input("Digite sua mensagem para o time...")
+        if nova_mensagem:
+            supabase.table("mensagens_chat").insert(
+                {"usuario_email": email_atual, "mensagem": nova_mensagem}
+            ).execute()
+            st.rerun(scope="fragment")
+
+    chat_fragment()
 
 # ------------------------------------------------------------------
 # Fechar turno: salva histórico completo e intacto ANTES de limpar
