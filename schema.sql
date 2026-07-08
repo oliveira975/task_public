@@ -28,9 +28,14 @@ create table if not exists public.historico_tasks (
   priority integer,
   qtd_itens integer,
   concluida boolean,
+  concluido_por text,
   created_at timestamptz,
   turno_fechado_em timestamptz not null default now()
 );
+
+-- Migração: se seu projeto já tinha rodado uma versão anterior deste
+-- schema (sem a coluna concluido_por), rode esta linha para atualizar:
+-- alter table public.historico_tasks add column if not exists concluido_por text;
 
 -- Migração: se você já tinha rodado uma versão anterior deste schema
 -- (sem priority/qtd_itens), rode só estas linhas para atualizar:
@@ -50,14 +55,57 @@ create index if not exists idx_historico_turno on public.historico_tasks (turno_
 alter table public.tasks enable row level security;
 alter table public.historico_tasks enable row level security;
 
+drop policy if exists "authenticated_full_access_tasks" on public.tasks;
 create policy "authenticated_full_access_tasks"
   on public.tasks for all
   to authenticated
   using (true)
   with check (true);
 
+drop policy if exists "authenticated_full_access_historico" on public.historico_tasks;
 create policy "authenticated_full_access_historico"
   on public.historico_tasks for all
+  to authenticated
+  using (true)
+  with check (true);
+
+-- ================================================================
+-- Chat do time
+-- ================================================================
+create table if not exists public.mensagens_chat (
+  id bigint generated always as identity primary key,
+  usuario_email text not null,
+  mensagem text not null,
+  editado boolean not null default false,
+  criado_em timestamptz not null default now()
+);
+
+create index if not exists idx_mensagens_chat_criado_em
+  on public.mensagens_chat (criado_em);
+
+alter table public.mensagens_chat enable row level security;
+
+drop policy if exists "authenticated_full_access_mensagens_chat" on public.mensagens_chat;
+create policy "authenticated_full_access_mensagens_chat"
+  on public.mensagens_chat for all
+  to authenticated
+  using (true)
+  with check (true);
+
+-- ================================================================
+-- Presença online (usado pelo Chat para mostrar quem está online)
+-- Cada usuário tem uma única linha, atualizada a cada refresh do chat.
+-- ================================================================
+create table if not exists public.presenca_usuarios (
+  email text primary key,
+  ultimo_acesso timestamptz not null default now()
+);
+
+alter table public.presenca_usuarios enable row level security;
+
+drop policy if exists "authenticated_full_access_presenca" on public.presenca_usuarios;
+create policy "authenticated_full_access_presenca"
+  on public.presenca_usuarios for all
   to authenticated
   using (true)
   with check (true);
